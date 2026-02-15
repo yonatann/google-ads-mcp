@@ -25,6 +25,8 @@ from google.ads.googleads.v21.services.services.google_ads_service import (
 )
 
 from google.ads.googleads.util import get_nested_attr
+from google.protobuf.json_format import MessageToDict
+from google.protobuf.message import Message as RawProtobufMessage
 import google.auth
 from ads_mcp.mcp_header_interceptor import MCPHeaderInterceptor
 import os
@@ -87,9 +89,33 @@ def get_googleads_type(typeName: str):
 
 
 def format_output_value(value: Any) -> Any:
+    """Convert Google Ads API values to JSON-serializable Python types.
+
+    Handles proto-plus enums/messages, raw protobuf messages, and repeated
+    containers (RepeatedScalarContainer, RepeatedCompositeContainer) that the
+    Google Ads API returns for fields like RSA headlines, descriptions, and
+    final_urls.
+    """
+    # Proto-plus enum (e.g. CampaignStatus.ENABLED)
     if isinstance(value, proto.Enum):
         return value.name
-    else:
+
+    # Proto-plus message wrapper
+    if isinstance(value, proto.Message):
+        return proto.Message.to_dict(value)
+
+    # Raw protobuf message (C extension types from google._upb._message)
+    if isinstance(value, RawProtobufMessage):
+        return MessageToDict(value, preserving_proto_field_name=True)
+
+    # Scalars pass through directly
+    if isinstance(value, (str, bytes, int, float, bool, type(None))):
+        return value
+
+    # Repeated containers and other iterables → convert to list recursively
+    try:
+        return [format_output_value(item) for item in value]
+    except TypeError:
         return value
 
 

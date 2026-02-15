@@ -66,7 +66,11 @@ def search(
             final_output.append(
                 utils.format_output_row(row, batch.field_mask.paths)
             )
-    return final_output
+
+    # Ensure all values are JSON-safe primitives. The pydantic_core
+    # serializer in the MCP SDK calls to_json without fallback, so any
+    # lingering protobuf containers will cause "Unable to serialize" errors.
+    return json.loads(json.dumps(final_output, default=str))
 
 
 def _load_resources() -> List[Dict]:
