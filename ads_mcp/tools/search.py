@@ -14,6 +14,7 @@
 
 """Tools for exposing the API Search method to the MCP server."""
 
+import json
 from typing import Any, Dict, List
 from ads_mcp.coordinator import mcp
 import ads_mcp.utils as utils
@@ -68,19 +69,20 @@ def search(
     return final_output
 
 
-def _search_tool_description() -> str:
-    """Returns the description for the `search` tool."""
-    # Add a warning that will be part of the description
-    file_content = (
-        "WARNING: The table of selectable fields is missing. "
-        "Tool may not function correctly."
-    )
-
+def _load_resources() -> List[Dict]:
+    """Loads the gaql_resources.json file and returns parsed JSON."""
     try:
         with open(utils.get_gaql_resources_filepath(), "r") as file:
-            file_content = file.read()
-    except FileNotFoundError:
-        utils.logger.error("The specified file was not found.")
+            return json.load(file)
+    except (FileNotFoundError, json.JSONDecodeError) as e:
+        utils.logger.error(f"Failed to load gaql_resources.json: {e}")
+        return []
+
+
+def _search_tool_description() -> str:
+    """Returns a compact description for the `search` tool."""
+    resources = _load_resources()
+    resource_names = [r["resource"] for r in resources]
 
     return f"""
 {search.__doc__}
@@ -104,15 +106,44 @@ def _search_tool_description() -> str:
     Requests to resource change_event must specify a LIMIT of less than or equal to 10000
 
 ### Hints for conversions questions
-    https://developers.google.com/google-ads/api/docs/conversions/upload-summaries 
+    https://developers.google.com/google-ads/api/docs/conversions/upload-summaries
 
+### Hints for fields
+    IMPORTANT: Before calling search, use the get_resource_fields tool to look up
+    the selectable, filterable, and sortable fields for your target resource.
+    All fields must come from that tool and be prefixed with the resource being searched.
+    Wildcards and partial fields are not allowed.
 
-### Hints for all fields
-    What follows is a table of resources and their selectable fields (fields), filterable fields (used in the condition) and sortable fields (use in the ordering)
-    Fields are comma separated, the whole field must be used, wildcards and partial fields are not allowed
-    All fields must come from this table and be prefixed with the resource being searched
-    {file_content}
+### Available resources
+    {', '.join(resource_names)}
 """
+
+
+@mcp.tool()
+def get_resource_fields(resource: str) -> Dict[str, Any]:
+    """Returns the selectable, filterable, and sortable fields for a Google Ads API resource.
+
+    Call this tool before using the search tool to discover valid field names.
+
+    Args:
+        resource: The resource name (e.g. 'campaign', 'ad_group', 'ad_group_ad').
+                  Use the search tool description to see all available resource names.
+    """
+    resources = _load_resources()
+    for r in resources:
+        if r["resource"] == resource:
+            return r
+
+    # Try partial match
+    matches = [r for r in resources if resource in r["resource"]]
+    if matches:
+        return {
+            "error": f"Resource '{resource}' not found. Did you mean one of: {[r['resource'] for r in matches[:10]]}?"
+        }
+
+    return {
+        "error": f"Resource '{resource}' not found. Use the search tool description to see available resource names."
+    }
 
 
 # The `search` tool requires a more complex description that's generated at
